@@ -933,7 +933,8 @@ async function runImport() {
   try {
     const res=await fetch('/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt})});
     const data=await res.json();
-    const raw=data.content.map(c=>c.text||'').join('').trim();
+    if(data.error){throw new Error(data.error);}
+    const raw=(data.text||'').trim();
     const parsed=JSON.parse(raw.replace(/```json|```/g,'').trim());
     importResults=parsed.map(song=>{
       const libSong=findSongInLibrary(song.name);
