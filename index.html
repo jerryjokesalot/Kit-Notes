@@ -75,6 +75,10 @@
   .song-entry.open .song-entry-chevron { transform: rotate(90deg); }
   .song-entry-body { display: none; border-top: 1px solid var(--border); padding: 14px 16px; background: var(--bg); }
   .song-entry.open .song-entry-body { display: block; }
+  .version-row { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+  .version-row:last-child { border-bottom: none; }
+  .version-row-name { font-family: 'DM Mono', monospace; font-size: 12px; color: var(--accent); }
+  .version-row-preview { font-size: 12px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .version-pill { display: inline-flex; align-items: center; gap: 6px; background: var(--surface2); border: 1px solid var(--border); border-radius: 20px; padding: 6px 12px; font-family: 'DM Mono', monospace; font-size: 12px; color: var(--text-muted); margin: 4px 4px 4px 0; cursor: pointer; }
   .version-pill:active { border-color: var(--accent); color: var(--accent); }
 
@@ -259,7 +263,7 @@
   <!-- SETLIST -->
   <div id="screen-setlist" class="screen active">
     <div class="section-label">Setlist Date</div>
-    <div class="date-row"><input type="text" id="setlist-date" placeholder="e.g. 5/25" /></div>
+    <div class="date-row"><input type="text" id="setlist-date" placeholder="e.g. 5/25" oninput="scheduleSetlistSave()" /></div>
     <div class="section-label">Add a Song</div>
     <div class="search-wrap">
       <input type="text" id="song-search" placeholder="Type a song name…" autocomplete="off" oninput="onSongSearch()" />
@@ -269,8 +273,9 @@
     <div id="setlist-songs">
       <div class="empty-state"><div class="empty-icon">🎵</div><div class="empty-title">No songs yet</div><div class="empty-body">Search above to add songs from your library</div></div>
     </div>
-    <div style="margin-top:20px;">
-      <button class="btn btn-primary" onclick="buildOutput()">Build My Notes →</button>
+    <div style="margin-top:20px;display:flex;gap:10px;">
+      <button class="btn btn-ghost" onclick="newSetlist()">New setlist</button>
+      <button class="btn btn-primary" style="flex:1;" onclick="buildOutput()">Build My Notes →</button>
     </div>
   </div>
 
@@ -317,8 +322,8 @@
         <div class="toolbar-divider"></div>
         <button class="toolbar-btn" id="clear-highlight-btn">✕ Clear</button>
       </div>
-      <div class="notes-editor" id="notes-editor" contenteditable="true" spellcheck="false"></div>
-      <p style="font-size:12px;color:var(--text-dim);margin-top:8px;line-height:1.5;">Select text → tap a color to highlight. Edits here are for this week only — your library is untouched.</p>
+      <div class="notes-editor" id="notes-editor" contenteditable="true" spellcheck="false" oninput="scheduleSetlistSave()"></div>
+      <p style="font-size:12px;color:var(--text-dim);margin-top:8px;line-height:1.5;">Select text → tap a color to highlight. Highlights stay with this setlist and sync to your other devices. Your library is untouched.</p>
       <div class="copy-row" style="margin-top:16px;">
         <button class="btn btn-ghost" onclick="copyNotes()">📋 Copy</button>
         <button class="btn btn-ghost" onclick="buildOutput()">↺ Rebuild</button>
@@ -333,6 +338,7 @@
       <div class="settings-section-title">Account</div>
       <div class="settings-row"><span class="settings-row-label">Signed in as</span><span class="settings-row-value" id="settings-email">—</span></div>
       <div class="settings-row"><span class="settings-row-label">Library file</span><span class="settings-row-value">kitnotes_library.json</span></div>
+      <div class="settings-row"><span class="settings-row-label">Setlist file</span><span class="settings-row-value">kitnotes_setlist.json</span></div>
       <div class="settings-row"><span class="settings-row-label">Songs saved</span><span class="settings-row-value" id="settings-song-count">0</span></div>
       <div style="margin-top:14px;">
         <button class="btn btn-ghost btn-sm" onclick="forceSyncNow()" style="margin-right:8px;">↺ Sync Now</button>
@@ -353,7 +359,7 @@
         <strong style="color:var(--accent);">Mac:</strong> Double-click the file to open in your default browser.
       </p>
       <p style="font-size:13px;color:var(--text-muted);line-height:1.7;">
-        Your library syncs via Google Drive — so no matter which device you use, it's always up to date. ✓
+        Your library and your current setlist sync via Google Drive — so no matter which device you use, they're the same until you start a new setlist. ✓
       </p>
     </div>
 
@@ -408,7 +414,8 @@
 <div class="modal-overlay" id="modal-edit-version">
   <div class="modal-sheet">
     <div class="modal-handle"></div>
-    <div class="modal-title">Edit Notes</div>
+    <div class="modal-title">Edit Song</div>
+    <div class="field-row"><div class="field-label">Song Name</div><input type="text" id="edit-song-name" /></div>
     <div class="field-row"><div class="field-label">Version Label</div><input type="text" id="edit-version-label" /></div>
     <div class="field-row"><div class="field-label">Drum Notes</div><textarea id="edit-version-notes" style="min-height:200px;"></textarea></div>
     <div class="modal-actions">
@@ -431,6 +438,7 @@
 const GOOGLE_CLIENT_ID = '839317142862-e58ltq4n034kg1ovdt1uoc9ugrsf44cl.apps.googleusercontent.com';
 const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.appdata';
 const LIBRARY_FILENAME = 'kitnotes_library.json';
+const SETLIST_FILENAME = 'kitnotes_setlist.json';
 
 // ══════════════════════════════════════════════════════
 //  STATE
@@ -439,6 +447,9 @@ let library = {};
 let setlist = [];
 let accessToken = null;
 let driveFileId = null;
+let setlistFileId = null;
+let setlistSyncTimeout = null;
+let setlistLoaded = false;
 let userEmail = '';
 let dragSrcIdx = null;
 let editingSong = null, editingVersionIdx = null;
@@ -465,6 +476,7 @@ function signInWithGoogle() {
       accessToken = response.access_token;
       await fetchUserInfo();
       await loadLibraryFromDrive();
+      await loadSetlistFromDrive();
       showApp();
     }
   });
@@ -484,7 +496,14 @@ async function fetchUserInfo() {
 
 function signOut() {
   if (!confirm('Sign out of Kit Notes?')) return;
-  accessToken = null; driveFileId = null; library = {}; userEmail = '';
+  accessToken = null; driveFileId = null; setlistFileId = null; library = {}; setlist = []; userEmail = '';
+  setlistLoaded = false;
+  const dateEl = document.getElementById('setlist-date');
+  if (dateEl) dateEl.value = '';
+  const editor = document.getElementById('notes-editor');
+  if (editor) editor.innerHTML = '';
+  renderSetlist();
+  renderNotesTab();
   document.getElementById('main-app').style.display = 'none';
   document.getElementById('auth-gate').classList.remove('hidden');
   setSyncStatus('idle');
@@ -494,6 +513,8 @@ function showApp() {
   document.getElementById('auth-gate').classList.add('hidden');
   document.getElementById('main-app').style.display = 'block';
   renderLibrary();
+  renderSetlist();
+  renderNotesTab();
   updateSettingsCount();
 }
 
@@ -573,8 +594,99 @@ function scheduleSave() {
   syncTimeout = setTimeout(() => saveLibraryToDrive(), 1500);
 }
 
+async function loadSetlistFromDrive() {
+  if (!accessToken) return;
+  try {
+    const searchRes = await fetch(
+      `https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&q=${encodeURIComponent("name='" + SETLIST_FILENAME + "'")}&fields=files(id,name)`,
+      { headers: { Authorization: `Bearer ${accessToken}` } }
+    );
+    const searchData = await searchRes.json();
+    if (searchData.files && searchData.files.length > 0) {
+      setlistFileId = searchData.files[0].id;
+      const fileRes = await fetch(
+        `https://www.googleapis.com/drive/v3/files/${setlistFileId}?alt=media`,
+        { headers: { Authorization: `Bearer ${accessToken}` } }
+      );
+      const data = await fileRes.json();
+      setlist = Array.isArray(data.songs) ? data.songs : [];
+      const dateEl = document.getElementById('setlist-date');
+      if (dateEl) dateEl.value = typeof data.date === 'string' ? data.date : '';
+      const editor = document.getElementById('notes-editor');
+      if (editor) editor.innerHTML = typeof data.notesHtml === 'string' ? data.notesHtml : '';
+    } else {
+      setlist = [];
+      setlistFileId = null;
+    }
+    setlistLoaded = true;
+  } catch (e) {
+    console.error('Setlist load error:', e);
+    setlistLoaded = false;
+    setSyncStatus('error');
+  }
+}
+
+async function saveSetlistToDrive() {
+  if (!accessToken || !setlistLoaded) return;
+  setSyncStatus('syncing');
+  const content = JSON.stringify({
+    date: document.getElementById('setlist-date').value.trim(),
+    songs: setlist,
+    notesHtml: document.getElementById('notes-editor').innerHTML
+  }, null, 2);
+  try {
+    if (setlistFileId) {
+      const res = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${setlistFileId}?uploadType=media`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        body: content
+      });
+      if (!res.ok) throw new Error('setlist update failed');
+    } else {
+      const metadata = { name: SETLIST_FILENAME, parents: ['appDataFolder'] };
+      const form = new FormData();
+      form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+      form.append('file', new Blob([content], { type: 'application/json' }));
+      const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}` },
+        body: form
+      });
+      const data = await res.json();
+      if (!data.id) throw new Error('setlist create failed');
+      setlistFileId = data.id;
+    }
+    setSyncStatus('synced');
+  } catch (e) {
+    console.error('Setlist save error:', e);
+    setSyncStatus('error');
+  }
+}
+
+function scheduleSetlistSave() {
+  if (!accessToken || !setlistLoaded) return;
+  setSyncStatus('syncing');
+  clearTimeout(setlistSyncTimeout);
+  setlistSyncTimeout = setTimeout(() => saveSetlistToDrive(), 1500);
+}
+
+function newSetlist() {
+  const date = document.getElementById('setlist-date').value.trim();
+  const notes = document.getElementById('notes-editor').textContent.trim();
+  if (setlist.length === 0 && !date && !notes) return;
+  if (!confirm('Start a new setlist? This week\'s songs will be cleared on every device signed into this account. Your library is kept.')) return;
+  setlist = [];
+  document.getElementById('setlist-date').value = '';
+  document.getElementById('notes-editor').innerHTML = '';
+  renderSetlist();
+  renderNotesTab();
+  scheduleSetlistSave();
+  showToast('New setlist');
+}
+
 async function forceSyncNow() {
   await saveLibraryToDrive();
+  await saveSetlistToDrive();
   showToast('Synced to Google Drive ✓');
 }
 
@@ -641,7 +753,7 @@ function renderLibrary() {
       </div>
       <div class="song-entry-body">
         <div class="field-label" style="margin-bottom:8px;">Versions</div>
-        <div>${versions.map((v,i)=>`<span class="version-pill" onclick="openEditVersion('${escAttr(songName)}',${i})">${escHtml(v.version)} ✎</span>`).join('')}</div>
+        <div>${versions.map((v,i)=>`<div class="version-row"><div style="flex:1;min-width:0;"><div class="version-row-name">${escHtml(v.version)}</div><div class="version-row-preview">${escHtml(v.notes.replace(/\s+/g,' ').slice(0,90))}</div></div><button class="btn btn-ghost btn-sm" onclick="openEditVersion('${escAttr(songName)}',${i})">Edit</button></div>`).join('')}</div>
         <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">
           <button class="btn btn-ghost btn-sm" onclick="openAddVersionModal('${escAttr(songName)}')">+ Add Version</button>
           <button class="btn btn-danger btn-sm" onclick="deleteSong('${escAttr(songName)}')">Delete Song</button>
@@ -699,17 +811,35 @@ function saveSong() {
 function openEditVersion(songName, vIdx) {
   editingSong = songName; editingVersionIdx = vIdx;
   const v = library[songName][vIdx];
+  document.getElementById('edit-song-name').value = songName;
   document.getElementById('edit-version-label').value = v.version;
   document.getElementById('edit-version-notes').value = v.notes;
   openModal('modal-edit-version');
 }
 
 function saveEditVersion() {
+  const newName = document.getElementById('edit-song-name').value.trim();
   const label = document.getElementById('edit-version-label').value.trim() || 'Standard';
   const notes = document.getElementById('edit-version-notes').value.trim();
+  if (!newName) { alert('Please enter a song name.'); return; }
   if (!notes) { alert('Notes cannot be empty.'); return; }
-  library[editingSong][editingVersionIdx] = { version: label, notes };
-  scheduleSave(); closeModal('modal-edit-version'); renderLibrary(); showToast('Notes updated!');
+  const updated = { version: label, notes };
+  if (newName === editingSong) {
+    const clash = library[editingSong].findIndex((v, i) => i !== editingVersionIdx && v.version.toLowerCase() === label.toLowerCase());
+    if (clash >= 0 && !confirm(`A "${label}" version already exists. Replace it?`)) return;
+    if (clash >= 0) library[editingSong].splice(clash, 1);
+    const idx = clash >= 0 && clash < editingVersionIdx ? editingVersionIdx - 1 : editingVersionIdx;
+    library[editingSong][idx] = updated;
+  } else {
+    if (!library[newName]) library[newName] = [];
+    const clash = library[newName].findIndex(v => v.version.toLowerCase() === label.toLowerCase());
+    if (clash >= 0 && !confirm(`"${newName}" already has a "${label}" version. Replace it?`)) return;
+    library[editingSong].splice(editingVersionIdx, 1);
+    if (library[editingSong].length === 0) delete library[editingSong];
+    if (clash >= 0) library[newName][clash] = updated;
+    else library[newName].push(updated);
+  }
+  scheduleSave(); closeModal('modal-edit-version'); renderLibrary(); showToast('Song updated!');
 }
 
 function deleteVersion() {
@@ -760,7 +890,7 @@ function pickVersion(vIdx) { closeModal('modal-version-pick'); addToSetlist(pend
 function addToSetlist(songName, vIdx) {
   const v = library[songName][vIdx];
   setlist.push({ song: songName, version: v.version, notes: v.notes });
-  renderSetlist(); showToast(`Added: ${songName}`);
+  renderSetlist(); scheduleSetlistSave(); showToast(`Added: ${songName}`);
 }
 
 function renderSetlist() {
@@ -784,17 +914,17 @@ function renderSetlist() {
     </div>`).join('');
 }
 
-function removeFromSetlist(idx) { setlist.splice(idx,1); renderSetlist(); }
+function removeFromSetlist(idx) { setlist.splice(idx,1); renderSetlist(); scheduleSetlistSave(); }
 
 function onDragStart(e,idx) { dragSrcIdx=idx; e.currentTarget.classList.add('dragging'); e.dataTransfer.effectAllowed='move'; }
 function onDragOver(e,idx) { e.preventDefault(); document.querySelectorAll('.setlist-song-row').forEach(r=>r.classList.remove('drag-over')); if(idx!==dragSrcIdx) e.currentTarget.classList.add('drag-over'); }
-function onDrop(e,idx) { e.preventDefault(); if(idx===dragSrcIdx)return; const m=setlist.splice(dragSrcIdx,1)[0]; setlist.splice(idx,0,m); dragSrcIdx=null; renderSetlist(); }
+function onDrop(e,idx) { e.preventDefault(); if(idx===dragSrcIdx)return; const m=setlist.splice(dragSrcIdx,1)[0]; setlist.splice(idx,0,m); dragSrcIdx=null; renderSetlist(); scheduleSetlistSave(); }
 function onDragEnd() { document.querySelectorAll('.setlist-song-row').forEach(r=>{r.classList.remove('dragging');r.classList.remove('drag-over');}); dragSrcIdx=null; }
 
 let touchDragIdx=null;
 function onTouchStart(e,idx){touchDragIdx=idx;e.currentTarget.parentElement.style.opacity='0.5';}
 function onTouchMove(e){e.preventDefault();const t=e.touches[0];document.querySelectorAll('.setlist-song-row').forEach(r=>r.classList.remove('drag-over'));const el=document.elementFromPoint(t.clientX,t.clientY);if(!el)return;const row=el.closest('.setlist-song-row');if(row&&row.dataset.idx!=touchDragIdx)row.classList.add('drag-over');}
-function onTouchEnd(e){const t=e.changedTouches[0];const el=document.elementFromPoint(t.clientX,t.clientY);document.querySelectorAll('.setlist-song-row').forEach(r=>{r.classList.remove('drag-over');r.style.opacity='';});if(el){const row=el.closest('.setlist-song-row');if(row&&row.dataset.idx!=null){const ti=parseInt(row.dataset.idx);if(ti!==touchDragIdx){const m=setlist.splice(touchDragIdx,1)[0];setlist.splice(ti,0,m);renderSetlist();}}}touchDragIdx=null;}
+function onTouchEnd(e){const t=e.changedTouches[0];const el=document.elementFromPoint(t.clientX,t.clientY);document.querySelectorAll('.setlist-song-row').forEach(r=>{r.classList.remove('drag-over');r.style.opacity='';});if(el){const row=el.closest('.setlist-song-row');if(row&&row.dataset.idx!=null){const ti=parseInt(row.dataset.idx);if(ti!==touchDragIdx){const m=setlist.splice(touchDragIdx,1)[0];setlist.splice(ti,0,m);renderSetlist();scheduleSetlistSave();}}}touchDragIdx=null;}
 
 function buildOutput() {
   if (setlist.length===0){alert('Add some songs to your setlist first!');return;}
@@ -885,7 +1015,7 @@ function buildPlayHTML(editorHTML) {
   let current=null,inContent=false;
   lines.forEach(line=>{
     const text=line.textContent.trim();
-    if(/^={10,}$/.test(text)){if(current&&inContent)blocks.push(current);current={title:'',version:'',noteLines:[]};inContent=false;return;}
+    if(/^={10,}$/.test(text)){if(current&&inContent&&current.noteLines.length===0)return;if(current&&inContent)blocks.push(current);current={title:'',version:'',noteLines:[]};inContent=false;return;}
     if(current&&!inContent&&text&&!/^={10,}$/.test(text)){
       if(text.includes(' — ')){const p=text.split(' — ');current.title=p[0].trim();current.version=p.slice(1).join(' — ').trim();}
       else{current.title=text;current.version='';}
